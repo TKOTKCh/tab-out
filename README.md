@@ -63,6 +63,8 @@ This project is forked from [https://github.com/zarazhangrui/tab-out](https://gi
 
 ## Install
 
+### Chrome
+
 **1. Clone the repo**
 
 ```bash
@@ -76,6 +78,26 @@ cd tab-out
 2. Enable **Developer mode** (top-right toggle)
 3. Click **Load unpacked**
 4. Navigate to the `extension/` folder inside the cloned repo and select it
+
+**3. Open a new tab**
+
+You'll see Tab Out.
+
+### Microsoft Edge
+
+**1. Clone the repo** (if not already cloned)
+
+```bash
+git clone https://github.com/TKOTKCh/tab-out.git
+cd tab-out
+```
+
+**2. Load the Edge extension**
+
+1. Open Microsoft Edge and go to `edge://extensions`
+2. Enable **Developer mode** (left sidebar toggle)
+3. Click **Load unpacked**
+4. Navigate to the `extension-edge/` folder inside the cloned repo and select it
 
 **3. Open a new tab**
 

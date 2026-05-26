@@ -62,13 +62,13 @@ Tab Out 是一个 Chrome 浏览器扩展，它将你的新标签页替换为一�
 
 ## 安装
 
-
-### 安装
+### Chrome
 
 **1. 克隆仓库**
 
 ```bash
 git clone https://github.com/TKOTKCh/tab-out.git
+cd tab-out
 ```
 
 **2. 加载 Chrome 扩展**
@@ -77,6 +77,26 @@ git clone https://github.com/TKOTKCh/tab-out.git
 2. 启用**开发者模式**（右上角开关）
 3. 点击**加载已解压的扩展程序**
 4. 导航到克隆仓库中的 `extension/` 文件夹并选择它
+
+**3. 打开新标签页**
+
+你将看到 Tab Out 仪表板。
+
+### Microsoft Edge
+
+**1. 克隆仓库**（如果还没克隆）
+
+```bash
+git clone https://github.com/TKOTKCh/tab-out.git
+cd tab-out
+```
+
+**2. 加载 Edge 扩展**
+
+1. 打开 Microsoft Edge 并访问 `edge://extensions`
+2. 启用**开发者模式**（左侧边栏开关）
+3. 点击**加载已解压的扩展程序**
+4. 导航到克隆仓库中的 `extension-edge/` 文件夹并选择它
 
 **3. 打开新标签页**
 
