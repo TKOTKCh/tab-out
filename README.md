@@ -7,6 +7,7 @@
 Tab Out is a Chrome extension that replaces your new tab page with a dashboard of everything you have open. Tabs are grouped by domain, with homepages (Gmail, X, LinkedIn, etc.) pulled into their own group. Close tabs with a satisfying swoosh + confetti.
 
 ---
+---
 
 ## 🔄 Fork Information
 
@@ -62,22 +63,10 @@ This project is forked from [https://github.com/zarazhangrui/tab-out](https://gi
 
 ## Install
 
-### With a coding agent
-
-Send your coding agent (Claude Code, Codex, etc.) this repo and say **"install this"**:
-
-```
-https://github.com/zarazhangrui/tab-out
-```
-
-The agent will walk you through it. Takes about 1 minute.
-
-### Manual Setup
-
 **1. Clone the repo**
 
 ```bash
-git clone https://github.com/zarazhangrui/tab-out.git
+git clone https://github.com/TKOTKCh/tab-out.git
 cd tab-out
 ```
 
@@ -121,15 +110,3 @@ Everything runs inside the Chrome extension. No external server, no API calls, n
 | Animations | CSS transitions + JS confetti particles |
 
 ---
-
-## License
-
-MIT
-
----
-
-Built by [Zara](https://x.com/zarazhangrui)
-
----
-
-_This is a fork with additional features_

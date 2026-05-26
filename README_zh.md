@@ -62,23 +62,13 @@ Tab Out 是一个 Chrome 浏览器扩展，它将你的新标签页替换为一�
 
 ## 安装
 
-### 使用编程助手安装
 
-将此仓库发送给你的编程助手（Claude Code、Codex 等），并说**"安装这个"**：
-
-```
-https://github.com/zarazhangrui/tab-out
-```
-
-助手会引导你完成安装，大约需要1分钟。
-
-### 手动安装
+### 安装
 
 **1. 克隆仓库**
 
 ```bash
-git clone https://github.com/zarazhangrui/tab-out.git
-cd tab-out
+git clone https://github.com/TKOTKCh/tab-out.git
 ```
 
 **2. 加载 Chrome 扩展**
@@ -121,15 +111,3 @@ cd tab-out
 | 动画 | CSS transitions + JS 彩带动画 |
 
 ---
-
-## 许可证
-
-MIT
-
----
-
-由 [Zara](https://x.com/zarazhangrui) 构建
-
----
-
-_这是一个带有额外功能的 fork 版本_
