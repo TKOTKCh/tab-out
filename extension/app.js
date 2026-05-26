@@ -40,13 +40,14 @@ async function fetchOpenTabs() {
 
     const tabs = await chrome.tabs.query({});
     openTabs = tabs.map(t => ({
-      id:       t.id,
-      url:      t.url,
-      title:    t.title,
-      windowId: t.windowId,
-      active:   t.active,
+      id:           t.id,
+      url:          t.url,
+      title:        t.title,
+      windowId:     t.windowId,
+      active:       t.active,
+      lastAccessed: t.lastAccessed || Date.now(),
       // Flag Tab Out's own pages so we can detect duplicate new tabs
-      isTabOut: t.url === newtabUrl || t.url === 'chrome://newtab/',
+      isTabOut:     t.url === newtabUrl || t.url === 'chrome://newtab/',
     }));
   } catch {
     // chrome.tabs API unavailable (shouldn't happen in an extension page)
@@ -167,6 +168,54 @@ async function closeDuplicateTabs(urls, keepOne = true) {
 
   if (toClose.length > 0) await chrome.tabs.remove(toClose);
   await fetchOpenTabs();
+}
+
+/**
+ * closeAllDuplicateTabs()
+ *
+ * Closes all duplicate tabs across all open tabs.
+ */
+async function closeAllDuplicateTabs() {
+  const allTabs = await chrome.tabs.query({});
+  
+  // Filter out internal pages
+  const realTabs = allTabs.filter(t => {
+    const url = t.url || '';
+    return !(
+      url.startsWith('chrome://') ||
+      url.startsWith('chrome-extension://') ||
+      url.startsWith('about:') ||
+      url.startsWith('edge://') ||
+      url.startsWith('brave://')
+    );
+  });
+  
+  // Find duplicates
+  const urlCounts = {};
+  for (const tab of realTabs) {
+    urlCounts[tab.url] = (urlCounts[tab.url] || 0) + 1;
+  }
+  
+  const dupeUrls = Object.keys(urlCounts).filter(url => urlCounts[url] > 1);
+  
+  // Close duplicates, keep one of each
+  const seen = new Set();
+  const toClose = [];
+  
+  for (const tab of realTabs) {
+    if (dupeUrls.includes(tab.url)) {
+      if (seen.has(tab.url)) {
+        toClose.push(tab.id);
+      } else {
+        seen.add(tab.url);
+      }
+    }
+  }
+  
+  if (toClose.length > 0) {
+    await chrome.tabs.remove(toClose);
+    await fetchOpenTabs();
+  }
 }
 
 /**
@@ -700,6 +749,7 @@ const ICONS = {
   close:   `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12" /></svg>`,
   archive: `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M20.25 7.5l-.625 10.632a2.25 2.25 0 0 1-2.247 2.118H6.622a2.25 2.25 0 0 1-2.247-2.118L3.75 7.5m6 4.125l2.25 2.25m0 0l2.25 2.25M12 13.875l2.25-2.25M12 13.875l-2.25 2.25M3.375 7.5h17.25c.621 0 1.125-.504 1.125-1.125v-1.5c0-.621-.504-1.125-1.125-1.125H3.375c-.621 0-1.125.504-1.125 1.125v1.5c0 .621.504 1.125 1.125 1.125Z" /></svg>`,
   focus:   `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="m4.5 19.5 15-15m0 0H8.25m11.25 0v11.25" /></svg>`,
+  clock:   `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M12 8v4l3 3m6-3a9 9 0 1 1-18 0 9 9 0 0 1 18 0z" /></svg>`,
 };
 
 
@@ -707,6 +757,518 @@ const ICONS = {
    IN-MEMORY STORE FOR OPEN-TAB GROUPS
    ---------------------------------------------------------------- */
 let domainGroups = [];
+
+/* ----------------------------------------------------------------
+   CLICK STATS — Track tab click counts
+   ---------------------------------------------------------------- */
+
+const CLICK_STATS_KEY = 'tab-out-click-stats';
+const STATS_EXPIRY_HOURS = 2;
+
+/**
+ * recordClick(url)
+ *
+ * Records a click on a tab URL.
+ */
+async function recordClick(url) {
+  try {
+    // Clean up URL
+    url = url.trim().replace(/^`+|`+$/g, '');
+    
+    const { clickStats = {} } = await chrome.storage.local.get(CLICK_STATS_KEY);
+    const now = Date.now();
+    
+    if (!clickStats[url]) {
+      clickStats[url] = [];
+    }
+    clickStats[url].push(now);
+    
+    await chrome.storage.local.set({ [CLICK_STATS_KEY]: clickStats });
+    console.log('[tab-out] Click recorded:', url, 'Total clicks for this URL:', clickStats[url].length);
+  } catch (err) {
+    console.warn('[tab-out] Failed to record click:', err);
+  }
+}
+
+/**
+ * getClickStats()
+ *
+ * Returns click stats for tabs in the last STATS_EXPIRY_HOURS hours.
+ */
+async function getClickStats() {
+  try {
+    // 先读取所有存储数据看看
+    const allStorage = await chrome.storage.local.get();
+    console.log('[tab-out] ALL storage data:', JSON.stringify(allStorage, null, 2));
+    console.log('[tab-out] CLICK_STATS_KEY:', CLICK_STATS_KEY);
+    
+    // 正确获取存储数据！不是解构！
+    const storageData = await chrome.storage.local.get(CLICK_STATS_KEY);
+    console.log('[tab-out] storageData:', JSON.stringify(storageData, null, 2));
+    
+    const clickStats = storageData[CLICK_STATS_KEY] || {};
+    console.log('[tab-out] clickStats:', JSON.stringify(clickStats, null, 2));
+    
+    const cutoff = Date.now() - (STATS_EXPIRY_HOURS * 60 * 60 * 1000);
+    
+    console.log('[tab-out] Stats cutoff time:', new Date(cutoff).toLocaleString());
+    
+    // 也在读取时清理键
+    const stats = {};
+    for (const [rawUrl, timestamps] of Object.entries(clickStats)) {
+      const url = rawUrl.trim().replace(/^`+|`+$/g, '');
+      const recentClicks = timestamps.filter(t => t >= cutoff);
+      if (recentClicks.length > 0) {
+        stats[url] = recentClicks.length;
+      }
+    }
+    
+    console.log('[tab-out] Filtered stats (last 2 hours):', JSON.stringify(stats, null, 2));
+    return stats;
+  } catch (err) {
+    console.warn('[tab-out] Failed to get click stats:', err);
+    return {};
+  }
+}
+
+/**
+ * cleanupOldStats()
+ *
+ * Removes click records older than STATS_EXPIRY_HOURS.
+ */
+async function cleanupOldStats() {
+  try {
+    const storageData = await chrome.storage.local.get(CLICK_STATS_KEY);
+    const clickStats = storageData[CLICK_STATS_KEY] || {};
+    const cutoff = Date.now() - (STATS_EXPIRY_HOURS * 60 * 60 * 1000);
+    
+    let changed = false;
+    for (const [url, timestamps] of Object.entries(clickStats)) {
+      const filtered = timestamps.filter(t => t >= cutoff);
+      if (filtered.length !== timestamps.length) {
+        clickStats[url] = filtered;
+        changed = true;
+      }
+    }
+    
+    if (changed) {
+      await chrome.storage.local.set({ [CLICK_STATS_KEY]: clickStats });
+    }
+  } catch (err) {
+    console.warn('[tab-out] Failed to cleanup old stats:', err);
+  }
+}
+
+/**
+ * groupTabsByClickCount()
+ *
+ * Groups real tabs by their click count in the last 2 hours.
+ */
+async function groupTabsByClickCount() {
+  const realTabs = getRealTabs();
+  const clickStats = await getClickStats();
+  
+  console.log('[tab-out] Real tabs for grouping:', realTabs.map(t => t.url));
+  console.log('[tab-out] Click stats for these tabs:', 
+    realTabs.map(t => ({ 
+      url: t.url, 
+      title: t.title,
+      count: clickStats[t.url] || 0 
+    })));
+  
+  const groups = {
+    frequent: {
+      label: 'Clicked ≥ 5 times',
+      tabs: [],
+      badgeColor: 'var(--status-active)',
+      badgeBg: 'rgba(61, 122, 74, 0.08)',
+    },
+    moderate: {
+      label: 'Clicked < 5 times',
+      tabs: [],
+      badgeColor: 'var(--status-cooling)',
+      badgeBg: 'rgba(184, 137, 46, 0.08)',
+    },
+    never: {
+      label: 'Not clicked recently',
+      tabs: [],
+      badgeColor: 'var(--muted)',
+      badgeBg: 'rgba(154, 145, 138, 0.08)',
+    },
+  };
+
+  for (const tab of realTabs) {
+    const url = tab.url.trim().replace(/^`+|`+$/g, '');
+    
+    // Try to find a matching URL in clickStats - be flexible
+    let count = 0;
+    if (clickStats[url]) {
+      count = clickStats[url];
+    } else {
+      // Try looking for the key in different formats
+      for (const [key, value] of Object.entries(clickStats)) {
+        const cleanedKey = key.trim().replace(/^`+|`+$/g, '');
+        if (cleanedKey === url) {
+          count = value.length;
+          break;
+        }
+      }
+    }
+    
+    console.log('[tab-out] Tab:', url, 'count:', count);
+    if (count >= 5) {
+      groups.frequent.tabs.push(tab);
+    } else if (count > 0) {
+      groups.moderate.tabs.push(tab);
+    } else {
+      groups.never.tabs.push(tab);
+    }
+  }
+
+  console.log('[tab-out] Final groups:', {
+    frequent: groups.frequent.tabs.length,
+    moderate: groups.moderate.tabs.length,
+    never: groups.never.tabs.length
+  });
+  console.log('[tab-out] Frequent tabs:', groups.frequent.tabs.map(t => t.url));
+  console.log('[tab-out] Moderate tabs:', groups.moderate.tabs.map(t => t.url));
+
+  return Object.values(groups).filter(g => g.tabs.length > 0);
+}
+
+/**
+ * renderClickStats(statsGroups)
+ *
+ * Renders the click stats section.
+ */
+async function renderClickStats(statsGroups) {
+  const statsSection = document.getElementById('clickStatsSection');
+  const statsMissions = document.getElementById('clickStatsMissions');
+  const statsSectionCount = document.getElementById('clickStatsSectionCount');
+
+  if (!statsSection || statsGroups.length === 0) {
+    if (statsSection) statsSection.style.display = 'none';
+    return;
+  }
+
+  statsSection.style.display = 'block';
+
+  const totalTabs = statsGroups.reduce((sum, g) => sum + g.tabs.length, 0);
+  statsSectionCount.innerHTML = `${statsGroups.length} groups, ${totalTabs} tabs &nbsp;&middot;&nbsp; <span style="color:var(--muted);font-size:11px;">(clicks in last 2 hours, data stored locally)</span> &nbsp;&middot;&nbsp; <button class="action-btn close-tabs" data-action="close-all-click-stats-tabs" style="font-size:11px;padding:3px 10px;">${ICONS.close} Close all ${totalTabs} tabs</button>`;
+
+  const cardsHtml = await Promise.all(statsGroups.map(group => renderClickStatsCard(group)));
+  statsMissions.innerHTML = cardsHtml.join('');
+}
+
+/**
+ * renderClickStatsCard(group)
+ *
+ * Builds HTML for one click stats group card.
+ */
+async function renderClickStatsCard(group) {
+  const tabs = group.tabs || [];
+  const tabCount = tabs.length;
+  const stableId = 'stats-' + group.label.replace(/[^a-z0-9]/g, '-');
+  const clickStats = await getClickStats();
+
+  // Count duplicates
+  const urlCounts = {};
+  for (const tab of tabs) {
+    urlCounts[tab.url] = (urlCounts[tab.url] || 0) + 1;
+  }
+  const dupeUrls = Object.entries(urlCounts).filter(([, c]) => c > 1);
+  const hasDupes = dupeUrls.length > 0;
+  const totalExtras = dupeUrls.reduce((s, [, c]) => s + c - 1, 0);
+
+  const seen = new Set();
+  const uniqueTabs = [];
+  for (const tab of tabs) {
+    if (!seen.has(tab.url)) {
+      seen.add(tab.url);
+      uniqueTabs.push(tab);
+    }
+  }
+
+  const visibleTabs = uniqueTabs.slice(0, 8);
+  const extraCount = uniqueTabs.length - visibleTabs.length;
+
+  const pageChips = visibleTabs.map(tab => {
+    const url = tab.url.trim().replace(/^`+|`+$/g, '');
+    let label = cleanTitle(smartTitle(stripTitleNoise(tab.title || ''), url), '');
+    try {
+      const parsed = new URL(url);
+      if (parsed.hostname === 'localhost' && parsed.port) label = `${parsed.port} ${label}`;
+    } catch {}
+    
+    // Try to find a matching URL in clickStats - be flexible
+    let count = 0;
+    if (clickStats[url]) {
+      count = clickStats[url];
+    } else {
+      // Try looking for the key in different formats
+      for (const [key, value] of Object.entries(clickStats)) {
+        const cleanedKey = key.trim().replace(/^`+|`+$/g, '');
+        if (cleanedKey === url) {
+          count = value.length;
+          break;
+        }
+      }
+    }
+    
+    const urlCount = urlCounts[tab.url] || 1;
+    const countBadge = count > 0 ? `<span class="chip-dupe-badge" style="background-color:rgba(61,122,74,0.12);color:var(--status-active);">(${count}×)</span>` : '';
+    const dupeBadge = urlCount > 1 ? `<span class="chip-dupe-badge">(${urlCount}×)</span>` : '';
+    const safeUrl = (url || '').replace(/"/g, '&quot;');
+    const safeTitle = label.replace(/"/g, '&quot;');
+    let domain = '';
+    try { domain = new URL(url).hostname; } catch {}
+    const faviconUrl = domain ? `https://www.google.com/s2/favicons?domain=${domain}&sz=16` : '';
+    const chipClass = urlCount > 1 ? ' chip-has-dupes' : '';
+    return `<div class="page-chip clickable${chipClass}" data-action="focus-tab" data-tab-url="${safeUrl}" title="${safeTitle}">
+      ${faviconUrl ? `<img class="chip-favicon" src="${faviconUrl}" alt="">` : ''}
+      <span class="chip-text">${label}</span>${countBadge}${dupeBadge}
+      <div class="chip-actions">
+        <button class="chip-action chip-save" data-action="defer-single-tab" data-tab-url="${safeUrl}" data-tab-title="${safeTitle}" title="Save for later">
+          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M17.593 3.322c1.1.128 1.907 1.077 1.907 2.185V21L12 17.25 4.5 21V5.507c0-1.108.806-2.057 1.907-2.185a48.507 48.507 0 0 1 11.186 0Z" /></svg>
+        </button>
+        <button class="chip-action chip-close" data-action="close-single-tab" data-tab-url="${safeUrl}" title="Close this tab">
+          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12" /></svg>
+        </button>
+      </div>
+    </div>`;
+  }).join('') + (extraCount > 0 ? buildOverflowChips(uniqueTabs.slice(8), {}) : '');
+
+  let actionsHtml = `
+    <button class="action-btn close-tabs" data-action="close-stats-group" data-stats-id="${stableId}">
+      ${ICONS.close}
+      Close all ${tabCount} tab${tabCount !== 1 ? 's' : ''}
+    </button>`;
+    
+  if (hasDupes) {
+    const dupeUrlsEncoded = dupeUrls.map(([url]) => encodeURIComponent(url)).join(',');
+    actionsHtml += `
+      <button class="action-btn" data-action="dedup-stats-group" data-dupe-urls="${dupeUrlsEncoded}" data-stats-id="${stableId}">
+        Close ${totalExtras} duplicate${totalExtras !== 1 ? 's' : ''}
+      </button>`;
+  }
+
+  const cardClass = hasDupes ? ' has-amber-bar' : ' has-neutral-bar';
+
+  return `
+    <div class="mission-card domain-card${cardClass}" data-stats-id="${stableId}">
+      <div class="status-bar"></div>
+      <div class="mission-content">
+        <div class="mission-top">
+          <span class="mission-name">${group.label}</span>
+          <span class="open-tabs-badge" style="color:${group.badgeColor};background:${group.badgeBg}">
+            ${ICONS.tabs}
+            ${tabCount} tab${tabCount !== 1 ? 's' : ''}
+          </span>
+          ${hasDupes ? `<span class="open-tabs-badge" style="color:var(--status-cooling);background:rgba(184,137,46,0.08);">${totalExtras} duplicate${totalExtras !== 1 ? 's' : ''}</span>` : ''}
+        </div>
+        <div class="mission-pages">${pageChips}</div>
+        <div class="actions">${actionsHtml}</div>
+      </div>
+      <div class="mission-meta">
+        <div class="mission-page-count">${tabCount}</div>
+        <div class="mission-page-label">tabs</div>
+      </div>
+    </div>`;
+}
+
+/**
+ * startStatsRefreshTimer()
+ *
+ * Starts a timer to refresh stats every STATS_EXPIRY_HOURS hours.
+ */
+function startStatsRefreshTimer() {
+  const interval = STATS_EXPIRY_HOURS * 60 * 60 * 1000;
+  
+  setInterval(async () => {
+    await cleanupOldStats();
+    await renderStaticDashboard();
+  }, interval);
+}
+
+/* ----------------------------------------------------------------
+   IDLE TABS GROUPING — Group tabs by last accessed time
+   ---------------------------------------------------------------- */
+
+/**
+ * getTimeGroup(tab)
+ *
+ * Determines which time group a tab belongs to based on lastAccessed.
+ * Returns: 'recent' (1 hour), 'medium' (2 hours), 'old' (3+ hours)
+ */
+function getTimeGroup(tab) {
+  const now = Date.now();
+  const lastAccess = tab.lastAccessed || now;
+  const hoursAgo = (now - lastAccess) / (1000 * 60 * 60);
+
+  if (hoursAgo < 1) return 'recent';
+  if (hoursAgo < 2) return 'medium';
+  return 'old';
+}
+
+/**
+ * groupTabsByAccessTime()
+ *
+ * Groups real tabs (excluding browser internals) by their last accessed time.
+ */
+function groupTabsByAccessTime() {
+  const realTabs = getRealTabs();
+  
+  const groups = {
+    recent: {
+      label: 'Opened in the last hour',
+      tabs: [],
+      badgeColor: 'var(--status-active)',
+      badgeBg: 'rgba(61, 122, 74, 0.08)',
+    },
+    medium: {
+      label: 'Opened 1-2 hours ago',
+      tabs: [],
+      badgeColor: 'var(--status-cooling)',
+      badgeBg: 'rgba(184, 137, 46, 0.08)',
+    },
+    old: {
+      label: 'Opened 2+ hours ago',
+      tabs: [],
+      badgeColor: 'var(--status-abandoned)',
+      badgeBg: 'rgba(179, 90, 90, 0.08)',
+    },
+  };
+
+  for (const tab of realTabs) {
+    const group = getTimeGroup(tab);
+    groups[group].tabs.push(tab);
+  }
+
+  return Object.values(groups).filter(g => g.tabs.length > 0);
+}
+
+/**
+ * renderIdleTabs(timeGroups)
+ *
+ * Renders the idle tabs section below the open tabs section.
+ */
+function renderIdleTabs(timeGroups) {
+  const idleSection = document.getElementById('idleTabsSection');
+  const idleMissions = document.getElementById('idleTabsMissions');
+  const idleSectionCount = document.getElementById('idleTabsSectionCount');
+
+  if (!idleSection || timeGroups.length === 0) {
+    if (idleSection) idleSection.style.display = 'none';
+    return;
+  }
+
+  idleSection.style.display = 'block';
+
+  const totalTabs = timeGroups.reduce((sum, g) => sum + g.tabs.length, 0);
+  idleSectionCount.innerHTML = `${timeGroups.length} groups, ${totalTabs} tabs &nbsp;&middot;&nbsp; <button class="action-btn close-tabs" data-action="close-all-idle-tabs" style="font-size:11px;padding:3px 10px;">${ICONS.close} Close all ${totalTabs} tabs</button>`;
+
+  idleMissions.innerHTML = timeGroups.map(group => renderIdleTimeCard(group)).join('');
+}
+
+/**
+ * renderIdleTimeCard(group)
+ *
+ * Builds HTML for one time-based group card.
+ */
+function renderIdleTimeCard(group) {
+  const tabs = group.tabs || [];
+  const tabCount = tabs.length;
+  const stableId = 'idle-' + group.label.replace(/[^a-z0-9]/g, '-');
+
+  const urlCounts = {};
+  for (const tab of tabs) urlCounts[tab.url] = (urlCounts[tab.url] || 0) + 1;
+  const dupeUrls = Object.entries(urlCounts).filter(([, c]) => c > 1);
+  const hasDupes = dupeUrls.length > 0;
+  const totalExtras = dupeUrls.reduce((s, [, c]) => s + c - 1, 0);
+
+  const tabBadge = `<span class="open-tabs-badge" style="color:${group.badgeColor};background:${group.badgeBg}">
+    ${ICONS.clock}
+    ${tabCount} tab${tabCount !== 1 ? 's' : ''}
+  </span>`;
+
+  const dupeBadge = hasDupes
+    ? `<span class="open-tabs-badge" style="color:var(--accent-amber);background:rgba(200,113,58,0.08);">
+        ${totalExtras} duplicate${totalExtras !== 1 ? 's' : ''}
+      </span>`
+    : '';
+
+  const seen = new Set();
+  const uniqueTabs = [];
+  for (const tab of tabs) {
+    if (!seen.has(tab.url)) {
+      seen.add(tab.url);
+      uniqueTabs.push(tab);
+    }
+  }
+
+  const visibleTabs = uniqueTabs.slice(0, 8);
+  const extraCount = uniqueTabs.length - visibleTabs.length;
+
+  const pageChips = visibleTabs.map(tab => {
+    let label = cleanTitle(smartTitle(stripTitleNoise(tab.title || ''), tab.url), '');
+    try {
+      const parsed = new URL(tab.url);
+      if (parsed.hostname === 'localhost' && parsed.port) label = `${parsed.port} ${label}`;
+    } catch {}
+    const count = urlCounts[tab.url];
+    const dupeTag = count > 1 ? ` <span class="chip-dupe-badge">(${count}x)</span>` : '';
+    const chipClass = count > 1 ? ' chip-has-dupes' : '';
+    const safeUrl = (tab.url || '').replace(/"/g, '&quot;');
+    const safeTitle = label.replace(/"/g, '&quot;');
+    let domain = '';
+    try { domain = new URL(tab.url).hostname; } catch {}
+    const faviconUrl = domain ? `https://www.google.com/s2/favicons?domain=${domain}&sz=16` : '';
+    return `<div class="page-chip clickable${chipClass}" data-action="focus-tab" data-tab-url="${safeUrl}" title="${safeTitle}">
+      ${faviconUrl ? `<img class="chip-favicon" src="${faviconUrl}" alt="">` : ''}
+      <span class="chip-text">${label}</span>${dupeTag}
+      <div class="chip-actions">
+        <button class="chip-action chip-save" data-action="defer-single-tab" data-tab-url="${safeUrl}" data-tab-title="${safeTitle}" title="Save for later">
+          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M17.593 3.322c1.1.128 1.907 1.077 1.907 2.185V21L12 17.25 4.5 21V5.507c0-1.108.806-2.057 1.907-2.185a48.507 48.507 0 0 1 11.186 0Z" /></svg>
+        </button>
+        <button class="chip-action chip-close" data-action="close-single-tab" data-tab-url="${safeUrl}" title="Close this tab">
+          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12" /></svg>
+        </button>
+      </div>
+    </div>`;
+  }).join('') + (extraCount > 0 ? buildOverflowChips(uniqueTabs.slice(8), urlCounts) : '');
+
+  let actionsHtml = `
+    <button class="action-btn close-tabs" data-action="close-idle-group" data-idle-id="${stableId}">
+      ${ICONS.close}
+      Close all ${tabCount} tab${tabCount !== 1 ? 's' : ''}
+    </button>`;
+
+  if (hasDupes) {
+    const dupeUrlsEncoded = dupeUrls.map(([url]) => encodeURIComponent(url)).join(',');
+    actionsHtml += `
+      <button class="action-btn" data-action="dedup-idle-group" data-dupe-urls="${dupeUrlsEncoded}" data-idle-id="${stableId}">
+        Close ${totalExtras} duplicate${totalExtras !== 1 ? 's' : ''}
+      </button>`;
+  }
+
+  return `
+    <div class="mission-card domain-card ${hasDupes ? 'has-amber-bar' : 'has-neutral-bar'}" data-idle-id="${stableId}">
+      <div class="status-bar"></div>
+      <div class="mission-content">
+        <div class="mission-top">
+          <span class="mission-name">${group.label}</span>
+          ${tabBadge}
+          ${dupeBadge}
+        </div>
+        <div class="mission-pages">${pageChips}</div>
+        <div class="actions">${actionsHtml}</div>
+      </div>
+      <div class="mission-meta">
+        <div class="mission-page-count">${tabCount}</div>
+        <div class="mission-page-label">tabs</div>
+      </div>
+    </div>`;
+}
 
 
 /* ----------------------------------------------------------------
@@ -716,18 +1278,19 @@ let domainGroups = [];
 /**
  * getRealTabs()
  *
- * Returns tabs that are real web pages — no chrome://, extension
- * pages, about:blank, etc.
+ * Returns tabs that are real web pages — keep chrome://, except newtab.
+ * Keep extension pages (except our own), edge://, brave:// etc. for stats.
  */
 function getRealTabs() {
+  const extensionId = chrome.runtime.id;
+  const newtabUrl = `chrome-extension://${extensionId}/index.html`;
+  
   return openTabs.filter(t => {
     const url = t.url || '';
-    return (
-      !url.startsWith('chrome://') &&
-      !url.startsWith('chrome-extension://') &&
-      !url.startsWith('about:') &&
-      !url.startsWith('edge://') &&
-      !url.startsWith('brave://')
+    return !(
+      url === newtabUrl ||
+      url === 'chrome://newtab/' ||
+      t.isTabOut
     );
   });
 }
@@ -735,17 +1298,58 @@ function getRealTabs() {
 /**
  * checkTabOutDupes()
  *
- * Counts how many Tab Out pages are open. If more than 1,
- * shows a banner offering to close the extras.
+ * Counts how many Tab Out pages are open and how many duplicate tabs exist.
+ * Shows a banner with options to close them.
  */
 function checkTabOutDupes() {
   const tabOutTabs = openTabs.filter(t => t.isTabOut);
   const banner  = document.getElementById('tabOutDupeBanner');
-  const countEl = document.getElementById('tabOutDupeCount');
+  const tabOutRow = document.getElementById('tabOutDupeRow');
+  const tabDupeRow = document.getElementById('tabDupeRow');
+  const tabOutCountEl = document.getElementById('tabOutDupeCount');
+  const tabDupeCountEl = document.getElementById('tabDupeCount');
+  const tabCleanupText = document.querySelector('.tab-cleanup-text');
+  
   if (!banner) return;
 
-  if (tabOutTabs.length > 1) {
-    if (countEl) countEl.textContent = tabOutTabs.length;
+  // Count duplicate tabs (excluding Tab Out tabs)
+  const realTabs = openTabs.filter(t => !t.isTabOut);
+  const urlCounts = {};
+  for (const tab of realTabs) {
+    urlCounts[tab.url] = (urlCounts[tab.url] || 0) + 1;
+  }
+  const dupeCount = Object.values(urlCounts).filter(c => c > 1).reduce((sum, c) => sum + c - 1, 0);
+
+  // Determine which rows will be visible
+  const showTabOutRow = tabOutTabs.length > 1;
+  const showDupeRow = dupeCount > 0;
+
+  // Show/hide rows based on if there are duplicates
+  if (showTabOutRow && tabOutRow) {
+    if (tabOutCountEl) tabOutCountEl.textContent = tabOutTabs.length;
+    tabOutRow.style.display = 'flex';
+  } else if (tabOutRow) {
+    tabOutRow.style.display = 'none';
+  }
+
+  if (showDupeRow && tabDupeRow) {
+    if (tabDupeCountEl) tabDupeCountEl.textContent = dupeCount;
+    tabDupeRow.style.display = 'flex';
+  } else if (tabDupeRow) {
+    tabDupeRow.style.display = 'none';
+  }
+
+  // Apply single-row class if only one row is visible
+  if (tabCleanupText) {
+    if ((showTabOutRow && !showDupeRow) || (!showTabOutRow && showDupeRow)) {
+      tabCleanupText.classList.add('single-row');
+    } else {
+      tabCleanupText.classList.remove('single-row');
+    }
+  }
+
+  // Show banner only if at least one row is visible
+  if (showTabOutRow || showDupeRow) {
     banner.style.display = 'flex';
   } else {
     banner.style.display = 'none';
@@ -1157,6 +1761,14 @@ async function renderStaticDashboard() {
     openTabsSection.style.display = 'none';
   }
 
+  // --- Render idle tabs (grouped by last accessed time) ---
+  const timeGroups = groupTabsByAccessTime();
+  renderIdleTabs(timeGroups);
+
+  // --- Render click stats ---
+  const statsGroups = await groupTabsByClickCount();
+  await renderClickStats(statsGroups);
+
   // --- Footer stats ---
   const statTabs = document.getElementById('statTabs');
   if (statTabs) statTabs.textContent = openTabs.length;
@@ -1170,6 +1782,7 @@ async function renderStaticDashboard() {
 
 async function renderDashboard() {
   await renderStaticDashboard();
+  startStatsRefreshTimer();
 }
 
 
@@ -1198,7 +1811,21 @@ document.addEventListener('click', async (e) => {
       banner.style.opacity = '0';
       setTimeout(() => { banner.style.display = 'none'; banner.style.opacity = '1'; }, 400);
     }
-    showToast('Closed extra Tab Out tabs');
+    showToast('Closed duplicate Tab-Out tabs');
+    return;
+  }
+
+  // ---- Close all duplicate tabs ----
+  if (action === 'close-all-dupes') {
+    await closeAllDuplicateTabs();
+    playCloseSound();
+    const banner = document.getElementById('tabOutDupeBanner');
+    if (banner) {
+      banner.style.transition = 'opacity 0.4s';
+      banner.style.opacity = '0';
+      setTimeout(() => { banner.style.display = 'none'; banner.style.opacity = '1'; }, 400);
+    }
+    showToast('Closed all duplicate tabs');
     return;
   }
 
@@ -1217,7 +1844,10 @@ document.addEventListener('click', async (e) => {
   // ---- Focus a specific tab ----
   if (action === 'focus-tab') {
     const tabUrl = actionEl.dataset.tabUrl;
-    if (tabUrl) await focusTab(tabUrl);
+    if (tabUrl) {
+      await focusTab(tabUrl);
+      await recordClick(tabUrl);
+    }
     return;
   }
 
@@ -1261,6 +1891,8 @@ document.addEventListener('click', async (e) => {
     if (statTabs) statTabs.textContent = openTabs.length;
 
     showToast('Tab closed');
+    
+    await renderStaticDashboard();
     return;
   }
 
@@ -1373,6 +2005,8 @@ document.addEventListener('click', async (e) => {
 
     const statTabs = document.getElementById('statTabs');
     if (statTabs) statTabs.textContent = openTabs.length;
+    
+    await renderStaticDashboard();
     return;
   }
 
@@ -1409,6 +2043,7 @@ document.addEventListener('click', async (e) => {
     }
 
     showToast('Closed duplicates, kept one copy each');
+    await renderStaticDashboard();
     return;
   }
 
@@ -1429,6 +2064,154 @@ document.addEventListener('click', async (e) => {
     });
 
     showToast('All tabs closed. Fresh start.');
+    await renderStaticDashboard();
+    return;
+  }
+
+  // ---- Close all tabs in an idle time group ----
+  if (action === 'close-idle-group') {
+    const idleId = actionEl.dataset.idleId;
+    const card = actionEl.closest('.mission-card');
+    if (!card) return;
+
+    const chips = card.querySelectorAll('.page-chip[data-action="focus-tab"]');
+    const urls = Array.from(chips).map(chip => chip.dataset.tabUrl).filter(Boolean);
+    
+    await closeTabsByUrls(urls);
+    playCloseSound();
+    animateCardOut(card);
+
+    showToast(`Closed ${urls.length} tab${urls.length !== 1 ? 's' : ''}`);
+    
+    await renderStaticDashboard();
+    return;
+  }
+
+  // ---- Close ALL idle tabs ----
+  if (action === 'close-all-idle-tabs') {
+    const timeGroups = groupTabsByAccessTime();
+    const allUrls = timeGroups.flatMap(g => g.tabs.map(t => t.url));
+    
+    await closeTabsByUrls(allUrls);
+    playCloseSound();
+
+    document.querySelectorAll('#idleTabsMissions .mission-card').forEach(c => {
+      shootConfetti(
+        c.getBoundingClientRect().left + c.offsetWidth / 2,
+        c.getBoundingClientRect().top  + c.offsetHeight / 2
+      );
+      animateCardOut(c);
+    });
+
+    showToast(`Closed ${allUrls.length} idle tab${allUrls.length !== 1 ? 's' : ''}`);
+    await renderStaticDashboard();
+    return;
+  }
+
+  // ---- Close duplicates in an idle group ----
+  if (action === 'dedup-idle-group') {
+    const urlsEncoded = actionEl.dataset.dupeUrls || '';
+    const urls = urlsEncoded.split(',').map(u => decodeURIComponent(u)).filter(Boolean);
+    if (urls.length === 0) return;
+
+    await closeDuplicateTabs(urls, true);
+    playCloseSound();
+
+    const card = actionEl.closest('.mission-card');
+    if (card) {
+      actionEl.style.transition = 'opacity 0.2s';
+      actionEl.style.opacity = '0';
+      setTimeout(() => actionEl.remove(), 200);
+
+      card.querySelectorAll('.chip-dupe-badge').forEach(b => {
+        b.style.transition = 'opacity 0.2s';
+        b.style.opacity = '0';
+        setTimeout(() => b.remove(), 200);
+      });
+      card.querySelectorAll('.open-tabs-badge').forEach(badge => {
+        if (badge.textContent.includes('duplicate')) {
+          badge.style.transition = 'opacity 0.2s';
+          badge.style.opacity = '0';
+          setTimeout(() => badge.remove(), 200);
+        }
+      });
+      card.classList.remove('has-amber-bar');
+      card.classList.add('has-neutral-bar');
+    }
+
+    showToast('Closed duplicates, kept one copy each');
+    await renderStaticDashboard();
+    return;
+  }
+
+  // ---- Close all tabs in a stats group ----
+  if (action === 'close-stats-group') {
+    const statsId = actionEl.dataset.statsId;
+    const card = actionEl.closest('.mission-card');
+    if (!card) return;
+
+    const chips = card.querySelectorAll('.page-chip[data-action="focus-tab"]');
+    const urls = Array.from(chips).map(chip => chip.dataset.tabUrl).filter(Boolean);
+    
+    await closeTabsByUrls(urls);
+    playCloseSound();
+    animateCardOut(card);
+
+    showToast(`Closed ${urls.length} tab${urls.length !== 1 ? 's' : ''}`);
+    await renderStaticDashboard();
+    return;
+  }
+
+  // ---- Dedup (close duplicate tabs) in a stats group ----
+  if (action === 'dedup-stats-group') {
+    const dupeUrlsEncoded = actionEl.dataset.dupeUrls;
+    if (!dupeUrlsEncoded) return;
+
+    const card = actionEl.closest('.mission-card');
+    if (!card) return;
+
+    // Parse URLs and collect all tabs in this group
+    const targetUrls = dupeUrlsEncoded.split(',').map(decodeURIComponent);
+    const chips = card.querySelectorAll('.page-chip[data-action="focus-tab"]');
+    const allUrlsInGroup = Array.from(chips).map(chip => chip.dataset.tabUrl).filter(Boolean);
+    
+    // For each duplicated URL, collect all tabs, keep the first one, close the rest
+    const seen = new Set();
+    const toClose = [];
+    
+    for (const url of allUrlsInGroup) {
+      if (targetUrls.includes(url)) {
+        if (seen.has(url)) {
+          toClose.push(url);
+        } else {
+          seen.add(url);
+        }
+      }
+    }
+    
+    if (toClose.length > 0) {
+      await closeTabsByUrls(toClose);
+      playCloseSound();
+      showToast(`Closed ${toClose.length} duplicate${toClose.length !== 1 ? 's' : ''}`);
+      await renderStaticDashboard();
+    }
+    return;
+  }
+
+  // ---- Close all tabs in Click Stats section ----
+  if (action === 'close-all-click-stats-tabs') {
+    const clickStatsMissions = document.getElementById('clickStatsMissions');
+    if (!clickStatsMissions) return;
+    
+    const allChips = clickStatsMissions.querySelectorAll('.page-chip[data-action="focus-tab"]');
+    const allUrls = Array.from(allChips).map(chip => chip.dataset.tabUrl).filter(Boolean);
+    
+    if (allUrls.length > 0) {
+      await closeTabsByUrls(allUrls);
+      playCloseSound();
+      showToast(`Closed ${allUrls.length} tab${allUrls.length !== 1 ? 's' : ''}`);
+      await renderStaticDashboard();
+    }
     return;
   }
 });
@@ -1477,6 +2260,63 @@ document.addEventListener('input', async (e) => {
 
 
 /* ----------------------------------------------------------------
+   LISTEN FOR MESSAGES FROM BACKGROUND
+   ---------------------------------------------------------------- */
+
+// Listen for refresh requests from background service worker
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  console.log('[tab-out] Received message:', message);
+  if (message.type === 'REFRESH_STATS') {
+    console.log('[tab-out] Processing REFRESH_STATS message');
+    renderStaticDashboard();
+  }
+});
+
+// Also listen for storage changes as a backup
+chrome.storage.onChanged.addListener((changes, areaName) => {
+  console.log('[tab-out] Storage change detected:', changes, 'Area:', areaName);
+  if (areaName === 'local' && (changes['tab-out-click-stats'] || changes['deferredTabs'])) {
+    console.log('[tab-out] Storage changed, refreshing dashboard');
+    renderStaticDashboard();
+  }
+});
+
+/* ----------------------------------------------------------------
    INITIALIZE
    ---------------------------------------------------------------- */
+
+// Clean up old bad data first
+(async function cleanupBadData() {
+  try {
+    const storageData = await chrome.storage.local.get(CLICK_STATS_KEY);
+    const clickStats = storageData[CLICK_STATS_KEY] || {};
+    
+    // Remove any keys with backticks or other bad data
+    let hasBadData = false;
+    const cleanedStats = {};
+    
+    for (const [key, value] of Object.entries(clickStats)) {
+      // Clean up the key
+      const cleanedKey = key.trim().replace(/^`+|`+$/g, '');
+      
+      // If the key was bad, mark as bad data
+      if (cleanedKey !== key) {
+        console.log('[tab-out] Cleaning up bad key:', key, '→', cleanedKey);
+        hasBadData = true;
+      }
+      
+      // Only keep valid keys
+      if (cleanedKey) {
+        cleanedStats[cleanedKey] = value;
+      }
+    }
+    
+    // Always save cleaned data to ensure consistency
+    console.log('[tab-out] Saving cleaned data');
+    await chrome.storage.local.set({ [CLICK_STATS_KEY]: cleanedStats });
+  } catch (e) {
+    console.warn('[tab-out] Failed to clean data:', e);
+  }
+})();
+
 renderDashboard();

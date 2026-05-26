@@ -13,6 +13,77 @@
  *   Red    (#b35a5a) → 21+ tabs   (time to cull!)
  */
 
+const CLICK_STATS_KEY = 'tab-out-click-stats';
+
+/**
+ * recordTabActivation(tabId)
+ *
+ * Records when a tab is activated/visited.
+ */
+async function recordTabActivation(tabId) {
+  try {
+    const tab = await chrome.tabs.get(tabId);
+    if (!tab.url) return;
+    
+    // Clean up URL - remove any backticks or extra characters
+    let url = tab.url.trim().replace(/^`+|`+$/g, '');
+    
+    // Skip internal pages
+    if (url.startsWith('chrome://') || 
+        url.startsWith('chrome-extension://') || 
+        url.startsWith('about:')) {
+      return;
+    }
+    
+    console.log('[tab-out background] Attempting to record activation for:', url);
+    
+    const storageData = await chrome.storage.local.get(CLICK_STATS_KEY);
+    let clickStats = storageData[CLICK_STATS_KEY] || {}; // Ensure it's an object
+    
+    const now = Date.now();
+    
+    if (!clickStats[url]) {
+      clickStats[url] = [];
+    }
+    clickStats[url].push(now);
+    
+    const storageObj = {};
+    storageObj[CLICK_STATS_KEY] = clickStats;
+    
+    console.log('[tab-out background] About to save to storage:', JSON.stringify(storageObj, null, 2));
+    await chrome.storage.local.set(storageObj);
+    
+    // Verify save
+    const verifyData = await chrome.storage.local.get(CLICK_STATS_KEY);
+    console.log('[tab-out background] Verified after save:', JSON.stringify(verifyData, null, 2));
+    
+    console.log('[tab-out background] Tab activation recorded:', url, 'Total for URL:', clickStats[url].length);
+    
+    // Notify Tab Out page if it's open
+    notifyTabOutPage();
+    
+  } catch (err) {
+    console.warn('[tab-out background] Failed to record tab activation:', err);
+  }
+}
+
+/**
+ * notifyTabOutPage()
+ *
+ * Notifies the Tab Out page (if open) to refresh data.
+ */
+async function notifyTabOutPage() {
+  try {
+    // Just send a broadcast message to any open extension pages
+    chrome.runtime.sendMessage({ type: 'REFRESH_STATS' }).catch(() => {
+      // Ignore errors if no listeners are available
+    });
+    console.log('[tab-out background] Broadcast REFRESH_STATS message sent');
+  } catch (err) {
+    console.warn('[tab-out background] Failed to notify Tab Out:', err);
+  }
+}
+
 // ─── Badge updater ────────────────────────────────────────────────────────────
 
 /**
@@ -75,15 +146,26 @@ chrome.runtime.onStartup.addListener(() => {
 // Update badge whenever a tab is opened
 chrome.tabs.onCreated.addListener(() => {
   updateBadge();
+  notifyTabOutPage();
 });
 
 // Update badge whenever a tab is closed
 chrome.tabs.onRemoved.addListener(() => {
   updateBadge();
+  notifyTabOutPage();
 });
 
-// Update badge when a tab's URL changes (e.g. navigating to/from chrome://)
-chrome.tabs.onUpdated.addListener(() => {
+// Update badge and record stats when a tab updates
+chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+  if (changeInfo.status === 'complete') {
+    recordTabActivation(tabId);
+  }
+  updateBadge();
+});
+
+// Record tab activation for stats
+chrome.tabs.onActivated.addListener((activeInfo) => {
+  recordTabActivation(activeInfo.tabId);
   updateBadge();
 });
 

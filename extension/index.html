@@ -40,28 +40,58 @@
         </svg>
       </div>
       <div class="tab-cleanup-text">
-        You have <strong id="tabOutDupeCount"></strong> Tab Out tabs open. Keep just this one?
+        <div class="tab-cleanup-row" id="tabOutDupeRow" style="display:none">
+          <span>You have <strong id="tabOutDupeCount"></strong> <strong>Tab Out</strong> tabs open. Keep just this one?</span>
+          <button class="tab-cleanup-btn" data-action="close-tabout-dupes">Close duplicate Tab-Out</button>
+        </div>
+        <div class="tab-cleanup-row" id="tabDupeRow" style="display:none">
+          <span>You have <strong id="tabDupeCount"></strong> duplicate tabs. Keep just one?</span>
+          <button class="tab-cleanup-btn" data-action="close-all-dupes">Close duplicates</button>
+        </div>
       </div>
     </div>
-    <button class="tab-cleanup-btn" data-action="close-tabout-dupes">Close extras</button>
   </div>
 
   <!-- ================================================================
-       MAIN CONTENT AREA — two-column layout
-       Left: open tabs (domain/mission cards)
+       MAIN CONTENT AREA — three-row layout
+       Top: open tabs (domain/mission cards)
+       Middle: idle tabs (grouped by last accessed time)
        Right: saved for later checklist
        The right column only renders when it has items (JS controls this)
        ================================================================ -->
   <div class="dashboard-columns" id="dashboardColumns">
 
-    <!-- LEFT COLUMN: Open tabs -->
-    <div class="active-section" id="openTabsSection" style="display:none">
-      <div class="section-header">
-        <h2 id="openTabsSectionTitle">Right now</h2>
-        <div class="section-line"></div>
-        <div class="section-count" id="openTabsSectionCount"></div>
+    <!-- LEFT COLUMN: Open tabs + Idle tabs stacked vertically -->
+    <div class="main-content">
+      <!-- OPEN TABS SECTION -->
+      <div class="active-section" id="openTabsSection" style="display:none">
+        <div class="section-header">
+          <h2 id="openTabsSectionTitle">Right now</h2>
+          <div class="section-line"></div>
+          <div class="section-count" id="openTabsSectionCount"></div>
+        </div>
+        <div class="missions" id="openTabsMissions"></div>
       </div>
-      <div class="missions" id="openTabsMissions"></div>
+
+      <!-- IDLE TABS SECTION: Grouped by last accessed time -->
+      <div class="active-section" id="idleTabsSection" style="display:none">
+        <div class="section-header">
+          <h2>Idle tabs</h2>
+          <div class="section-line"></div>
+          <div class="section-count" id="idleTabsSectionCount"></div>
+        </div>
+        <div class="missions" id="idleTabsMissions"></div>
+      </div>
+
+      <!-- CLICK STATS SECTION: Grouped by click count -->
+      <div class="active-section" id="clickStatsSection" style="display:none">
+        <div class="section-header">
+          <h2>Click stats</h2>
+          <div class="section-line"></div>
+          <div class="section-count" id="clickStatsSectionCount"></div>
+        </div>
+        <div class="missions" id="clickStatsMissions"></div>
+      </div>
     </div>
 
     <!-- RIGHT COLUMN: Saved for Later checklist -->
@@ -127,7 +157,7 @@
 
 <!-- Personal config (gitignored) — defines LOCAL_LANDING_PAGE_PATTERNS etc. -->
 <!-- If the file doesn't exist, that's fine — app.js uses sensible defaults. -->
-<script src="config.local.js" onerror="/* no personal config, that's fine */"></script>
+<script src="config.local.js"></script>
 
 <!-- Main dashboard logic — loads last so the DOM is ready -->
 <script src="app.js"></script>

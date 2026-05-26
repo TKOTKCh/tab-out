@@ -2,21 +2,44 @@
 
 **Keep tabs on your tabs.**
 
-Tab Out is a Chrome extension that replaces your new tab page with a dashboard of everything you have open. Tabs are grouped by domain, with homepages (Gmail, X, LinkedIn, etc.) pulled into their own group. Close tabs with a satisfying swoosh + confetti.
+> **English** | [中文](README_zh.md)
 
-No server. No account. No external API calls. Just a Chrome extension.
+Tab Out is a Chrome extension that replaces your new tab page with a dashboard of everything you have open. Tabs are grouped by domain, with homepages (Gmail, X, LinkedIn, etc.) pulled into their own group. Close tabs with a satisfying swoosh + confetti.
 
 ---
 
-## Install with a coding agent
+## 🔄 Fork Information
 
-Send your coding agent (Claude Code, Codex, etc.) this repo and say **"install this"**:
+This project is forked from [https://github.com/zarazhangrui/tab-out](https://github.com/zarazhangrui/tab-out). The following new features have been added:
 
-```
-https://github.com/zarazhangrui/tab-out
-```
+### ✨ New Features Added
 
-The agent will walk you through it. Takes about 1 minute.
+1. **Idle Tabs Section** - Group tabs by last accessed time:
+   - Opened in the last hour
+   - Opened 1-2 hours ago
+   - Opened 2+ hours ago
+   - With "Close all tabs" and "Close duplicates" buttons
+
+2. **Click Stats Section** - Track tab click counts:
+   - Clicked ≥ 5 times (frequent)
+   - Clicked < 5 times (moderate)
+   - Not clicked recently
+   - Auto-refreshes every 2 hours
+   - Data stored locally in `chrome.storage.local`
+
+3. **Enhanced Duplicate Banner** - Improved cleanup options:
+   - "Close duplicate Tab-Out" button
+   - "Close duplicates" button for all duplicate tabs
+   - Smart visibility - only shows when duplicates exist
+
+4. **Real-time Updates** - Auto-sync when tabs change:
+   - Tab creation/deletion triggers dashboard refresh
+   - Click tracking works in background
+
+5. **Additional Improvements**:
+   - Support for chrome:// pages in stats
+   - Better styling and UI improvements
+   - Fixed Content Security Policy issues
 
 ---
 
@@ -30,17 +53,32 @@ The agent will walk you through it. Takes about 1 minute.
 - **Save for later** bookmark tabs to a checklist before closing them
 - **Localhost grouping** shows port numbers next to each tab so you can tell your vibe coding projects apart
 - **Expandable groups** show the first 8 tabs with a clickable "+N more"
+- **Idle tabs section** groups tabs by last accessed time
+- **Click stats section** tracks how often you access each tab
 - **100% local** your data never leaves your machine
 - **Pure Chrome extension** no server, no Node.js, no npm, no setup beyond loading the extension
 
 ---
 
-## Manual Setup
+## Install
+
+### With a coding agent
+
+Send your coding agent (Claude Code, Codex, etc.) this repo and say **"install this"**:
+
+```
+https://github.com/zarazhangrui/tab-out
+```
+
+The agent will walk you through it. Takes about 1 minute.
+
+### Manual Setup
 
 **1. Clone the repo**
 
 ```bash
 git clone https://github.com/zarazhangrui/tab-out.git
+cd tab-out
 ```
 
 **2. Load the Chrome extension**
@@ -62,6 +100,8 @@ You'll see Tab Out.
 You open a new tab
   -> Tab Out shows your open tabs grouped by domain
   -> Homepages (Gmail, X, etc.) get their own group at the top
+  -> Idle tabs shown grouped by last accessed time
+  -> Click stats shown grouped by click frequency
   -> Click any tab title to jump to it
   -> Close groups you're done with (swoosh + confetti)
   -> Save tabs for later before closing them
@@ -89,3 +129,7 @@ MIT
 ---
 
 Built by [Zara](https://x.com/zarazhangrui)
+
+---
+
+_This is a fork with additional features_
