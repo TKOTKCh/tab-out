@@ -29,6 +29,16 @@
   </header>
 
   <!-- ================================================================
+       SEARCH BAR — Search open tabs or perform web search
+       ================================================================ -->
+  <div class="search-bar-container" style="margin-bottom: 16px;">
+    <div class="search-bar-wrapper">
+      <input type="text" id="searchInput" class="search-input" placeholder="Search tabs or web...">
+      <div class="search-results" id="searchResults" style="display: none;"></div>
+    </div>
+  </div>
+
+  <!-- ================================================================
        TAB OUT DUPES BANNER — appears when you have extra Tab Out tabs open
        Hidden by default; app.js shows it when dupeTabOutCount > 1
        ================================================================ -->
@@ -46,7 +56,7 @@
         </div>
         <div class="tab-cleanup-row" id="tabDupeRow" style="display:none">
           <span>You have <strong id="tabDupeCount"></strong> duplicate tabs. Keep just one?</span>
-          <button class="tab-cleanup-btn" data-action="close-all-dupes">Close duplicates</button>
+          <button class="tab-cleanup-btn" data-action="close-all-dupes">Close all duplicates</button>
         </div>
       </div>
     </div>
@@ -73,24 +83,27 @@
         <div class="missions" id="openTabsMissions"></div>
       </div>
 
-      <!-- IDLE TABS SECTION: Grouped by last accessed time -->
-      <div class="active-section" id="idleTabsSection" style="display:none">
-        <div class="section-header">
-          <h2>Idle tabs</h2>
-          <div class="section-line"></div>
-          <div class="section-count" id="idleTabsSectionCount"></div>
+      <!-- IDLE TABS & CLICK STATS CONTAINER: Side by side layout -->
+      <div class="stats-container" id="statsContainer" style="display:none">
+        <!-- IDLE TABS SECTION: Grouped by last accessed time -->
+        <div class="active-section stats-section" id="idleTabsSection" style="display:none">
+          <div class="section-header">
+            <h2>Idle tabs</h2>
+            <div class="section-line"></div>
+            <div class="section-count" id="idleTabsSectionCount"></div>
+          </div>
+          <div class="missions" id="idleTabsMissions"></div>
         </div>
-        <div class="missions" id="idleTabsMissions"></div>
-      </div>
 
-      <!-- CLICK STATS SECTION: Grouped by click count -->
-      <div class="active-section" id="clickStatsSection" style="display:none">
-        <div class="section-header">
-          <h2>Click stats</h2>
-          <div class="section-line"></div>
-          <div class="section-count" id="clickStatsSectionCount"></div>
+        <!-- CLICK STATS SECTION: Grouped by click count -->
+        <div class="active-section stats-section" id="clickStatsSection" style="display:none">
+          <div class="section-header">
+            <h2>Click stats</h2>
+            <div class="section-line"></div>
+            <div class="section-count" id="clickStatsSectionCount"></div>
+          </div>
+          <div class="missions" id="clickStatsMissions"></div>
         </div>
-        <div class="missions" id="clickStatsMissions"></div>
       </div>
     </div>
 

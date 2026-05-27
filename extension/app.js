@@ -174,20 +174,25 @@ async function closeDuplicateTabs(urls, keepOne = true) {
  * closeAllDuplicateTabs()
  *
  * Closes all duplicate tabs across all open tabs.
+ * Includes chrome:// pages like extensions which can be safely closed.
  */
 async function closeAllDuplicateTabs() {
   const allTabs = await chrome.tabs.query({});
   
-  // Filter out internal pages
+  // Filter out only pages that shouldn't be closed programmatically
+  // Allow chrome:// pages like extensions, history, downloads to be closed
   const realTabs = allTabs.filter(t => {
     const url = t.url || '';
-    return !(
-      url.startsWith('chrome://') ||
-      url.startsWith('chrome-extension://') ||
-      url.startsWith('about:') ||
-      url.startsWith('edge://') ||
-      url.startsWith('brave://')
-    );
+    // Skip Tab Out pages and browser startup pages
+    if (url === 'chrome://newtab/' || url.startsWith('chrome-extension://')) {
+      return false;
+    }
+    // Skip about:blank and similar browser internals
+    if (url.startsWith('about:')) {
+      return false;
+    }
+    // Allow chrome:// pages (extensions, history, downloads, etc.)
+    return true;
   });
   
   // Find duplicates
@@ -937,6 +942,24 @@ async function groupTabsByClickCount() {
 }
 
 /**
+ * updateStatsContainerDisplay()
+ *
+ * Updates the stats container display based on whether idle tabs or click stats are visible.
+ */
+function updateStatsContainerDisplay() {
+  const idleSection = document.getElementById('idleTabsSection');
+  const statsSection = document.getElementById('clickStatsSection');
+  const statsContainer = document.getElementById('statsContainer');
+
+  if (!statsContainer) return;
+
+  const idleVisible = idleSection && idleSection.style.display !== 'none';
+  const statsVisible = statsSection && statsSection.style.display !== 'none';
+
+  statsContainer.style.display = (idleVisible || statsVisible) ? 'block' : 'none';
+}
+
+/**
  * renderClickStats(statsGroups)
  *
  * Renders the click stats section.
@@ -945,13 +968,16 @@ async function renderClickStats(statsGroups) {
   const statsSection = document.getElementById('clickStatsSection');
   const statsMissions = document.getElementById('clickStatsMissions');
   const statsSectionCount = document.getElementById('clickStatsSectionCount');
+  const statsContainer = document.getElementById('statsContainer');
 
   if (!statsSection || statsGroups.length === 0) {
     if (statsSection) statsSection.style.display = 'none';
+    updateStatsContainerDisplay();
     return;
   }
 
   statsSection.style.display = 'block';
+  updateStatsContainerDisplay();
 
   const totalTabs = statsGroups.reduce((sum, g) => sum + g.tabs.length, 0);
   statsSectionCount.innerHTML = `${statsGroups.length} groups, ${totalTabs} tabs &nbsp;&middot;&nbsp; <span style="color:var(--muted);font-size:11px;">(clicks in last 2 hours, data stored locally)</span> &nbsp;&middot;&nbsp; <button class="action-btn close-tabs" data-action="close-all-click-stats-tabs" style="font-size:11px;padding:3px 10px;">${ICONS.close} Close all ${totalTabs} tabs</button>`;
@@ -1156,13 +1182,16 @@ function renderIdleTabs(timeGroups) {
   const idleSection = document.getElementById('idleTabsSection');
   const idleMissions = document.getElementById('idleTabsMissions');
   const idleSectionCount = document.getElementById('idleTabsSectionCount');
+  const statsContainer = document.getElementById('statsContainer');
 
   if (!idleSection || timeGroups.length === 0) {
     if (idleSection) idleSection.style.display = 'none';
+    updateStatsContainerDisplay();
     return;
   }
 
   idleSection.style.display = 'block';
+  updateStatsContainerDisplay();
 
   const totalTabs = timeGroups.reduce((sum, g) => sum + g.tabs.length, 0);
   idleSectionCount.innerHTML = `${timeGroups.length} groups, ${totalTabs} tabs &nbsp;&middot;&nbsp; <button class="action-btn close-tabs" data-action="close-all-idle-tabs" style="font-size:11px;padding:3px 10px;">${ICONS.close} Close all ${totalTabs} tabs</button>`;
@@ -1778,6 +1807,9 @@ async function renderStaticDashboard() {
 
   // --- Render "Saved for Later" column ---
   await renderDeferredColumn();
+
+  // --- Ensure stats container is properly displayed ---
+  updateStatsContainerDisplay();
 }
 
 async function renderDashboard() {
@@ -1805,13 +1837,8 @@ document.addEventListener('click', async (e) => {
   if (action === 'close-tabout-dupes') {
     await closeTabOutDupes();
     playCloseSound();
-    const banner = document.getElementById('tabOutDupeBanner');
-    if (banner) {
-      banner.style.transition = 'opacity 0.4s';
-      banner.style.opacity = '0';
-      setTimeout(() => { banner.style.display = 'none'; banner.style.opacity = '1'; }, 400);
-    }
     showToast('Closed duplicate Tab-Out tabs');
+    await renderStaticDashboard();
     return;
   }
 
@@ -1819,13 +1846,8 @@ document.addEventListener('click', async (e) => {
   if (action === 'close-all-dupes') {
     await closeAllDuplicateTabs();
     playCloseSound();
-    const banner = document.getElementById('tabOutDupeBanner');
-    if (banner) {
-      banner.style.transition = 'opacity 0.4s';
-      banner.style.opacity = '0';
-      setTimeout(() => { banner.style.display = 'none'; banner.style.opacity = '1'; }, 400);
-    }
     showToast('Closed all duplicate tabs');
+    await renderStaticDashboard();
     return;
   }
 
@@ -1875,9 +1897,17 @@ document.addEventListener('click', async (e) => {
       chip.style.transform  = 'scale(0.8)';
       setTimeout(() => {
         chip.remove();
-        // If the card now has no tabs, remove it too
-        const parentCard = document.querySelector('.mission-card:has(.mission-pages:empty)');
-        if (parentCard) animateCardOut(parentCard);
+        
+        // Find the parent card and check if it's now empty
+        let parentCard = chip.closest('.mission-card');
+        if (parentCard) {
+          const remainingChips = parentCard.querySelectorAll('.page-chip[data-action="focus-tab"]');
+          if (remainingChips.length === 0) {
+            animateCardOut(parentCard);
+          }
+        }
+
+        // Also check for empty cards globally
         document.querySelectorAll('.mission-card').forEach(c => {
           if (c.querySelectorAll('.page-chip[data-action="focus-tab"]').length === 0) {
             animateCardOut(c);
@@ -1891,8 +1921,6 @@ document.addEventListener('click', async (e) => {
     if (statTabs) statTabs.textContent = openTabs.length;
 
     showToast('Tab closed');
-    
-    await renderStaticDashboard();
     return;
   }
 
@@ -2318,5 +2346,394 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
     console.warn('[tab-out] Failed to clean data:', e);
   }
 })();
+
+/* ----------------------------------------------------------------
+   SEARCH BAR FUNCTIONALITY
+   ---------------------------------------------------------------- */
+
+// Search bar event listeners
+document.addEventListener('DOMContentLoaded', () => {
+  const searchInput = document.getElementById('searchInput');
+  const searchResults = document.getElementById('searchResults');
+  
+  if (!searchInput) return;
+
+  let isComposing = false; // 跟踪输入法状态
+  let selectedIndex = -1; // 当前选中的搜索结果索引
+  let resultItems = []; // 搜索结果项列表
+
+  // Focus search input on page load
+  searchInput.focus();
+
+  // 输入法开始
+  searchInput.addEventListener('compositionstart', () => {
+    isComposing = true;
+  });
+
+  // 输入法结束 - 在输入法完成后再搜索
+  searchInput.addEventListener('compositionend', () => {
+    isComposing = false;
+    handleSearch();
+  });
+
+  // Handle input changes - 只有在非输入法状态时才立即搜索
+  searchInput.addEventListener('input', (e) => {
+    if (!isComposing) {
+      handleSearch();
+    }
+  });
+
+  // 更新选中项的高亮显示
+  function updateSelection() {
+    resultItems.forEach((item, index) => {
+      item.classList.toggle('selected', index === selectedIndex);
+    });
+    
+    // 滚动到选中项
+    if (selectedIndex >= 0 && resultItems[selectedIndex]) {
+      resultItems[selectedIndex].scrollIntoView({ 
+        behavior: 'smooth', 
+        block: 'nearest' 
+      });
+    }
+  }
+
+  // 执行选中项的操作
+  async function executeSelectedItem() {
+    if (selectedIndex >= 0 && resultItems[selectedIndex]) {
+      const item = resultItems[selectedIndex];
+      const action = item.dataset.action;
+      
+      if (action === 'go-to-tab') {
+        const tabId = parseInt(item.dataset.tabId);
+        await goToTab(tabId);
+      } else if (action === 'open-history') {
+        const url = decodeURIComponent(item.dataset.url);
+        openHistoryItem(url);
+      } else if (action === 'web-search') {
+        const query = decodeURIComponent(item.dataset.query);
+        performWebSearch(query);
+      }
+    } else {
+      // 如果没有选中项，执行默认搜索
+      await handleSearchEnter();
+    }
+  }
+
+  // 当搜索结果更新时，重置选中状态并获取项列表
+  const originalShowSearchResults = showSearchResults;
+  window.showSearchResults = function(tabs, history, query) {
+    originalShowSearchResults(tabs, history, query);
+    resultItems = Array.from(searchResults.querySelectorAll('.search-result-item'));
+    selectedIndex = -1;
+  };
+
+  const originalShowSearchHistory = showSearchHistory;
+  window.showSearchHistory = async function() {
+    await originalShowSearchHistory();
+    resultItems = Array.from(searchResults.querySelectorAll('.search-result-item'));
+    selectedIndex = -1;
+  };
+
+  // Handle keyboard navigation - 只有在非输入法状态时才响应
+  searchInput.addEventListener('keydown', async (e) => {
+    if (isComposing) return;
+    
+    // 更新结果项列表（以防有更新）
+    if (!resultItems || resultItems.length === 0) {
+      resultItems = Array.from(searchResults.querySelectorAll('.search-result-item'));
+    }
+    
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      if (resultItems.length > 0) {
+        selectedIndex = (selectedIndex + 1) % resultItems.length;
+        updateSelection();
+      }
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      if (resultItems.length > 0) {
+        selectedIndex = selectedIndex <= 0 ? resultItems.length - 1 : selectedIndex - 1;
+        updateSelection();
+      }
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      await executeSelectedItem();
+    } else if (e.key === 'Escape') {
+      hideSearchResults();
+    }
+  });
+
+  // Show history on focus if input is empty
+  searchInput.addEventListener('focus', async () => {
+    if (searchInput.value.trim() === '') {
+      await showSearchHistory();
+    }
+  });
+
+  // Close search results when clicking outside
+  document.addEventListener('click', (e) => {
+    if (!searchInput.contains(e.target) && !searchResults.contains(e.target)) {
+      hideSearchResults();
+    }
+  });
+});
+
+// Get browser history
+async function getBrowserHistory(query = '', limit = 20) {
+  try {
+    const endTime = Date.now();
+    // Search last 30 days (broader range)
+    const startTime = endTime - (30 * 24 * 60 * 60 * 1000);
+    
+    console.log('[tab-out] Getting browser history with query:', query);
+    
+    const historyItems = await chrome.history.search({
+      text: query,
+      startTime: startTime,
+      maxResults: limit * 2
+    });
+    
+    console.log('[tab-out] Found history items:', historyItems);
+    
+    // Deduplicate by URL
+    const seenUrls = new Set();
+    const uniqueHistory = [];
+    for (const item of historyItems) {
+      if (!seenUrls.has(item.url) && item.url && !item.url.startsWith('chrome://') && !item.url.startsWith('chrome-extension://')) {
+        seenUrls.add(item.url);
+        uniqueHistory.push(item);
+      }
+    }
+    
+    console.log('[tab-out] Unique history items:', uniqueHistory);
+    return uniqueHistory.slice(0, limit);
+  } catch (err) {
+    console.warn('[tab-out] Failed to get browser history:', err);
+    return [];
+  }
+}
+
+// Handle search input changes
+async function handleSearch() {
+  const searchInput = document.getElementById('searchInput');
+  const searchResults = document.getElementById('searchResults');
+  const query = searchInput.value.trim().toLowerCase();
+
+  if (query.length === 0) {
+    await showSearchHistory();
+    return;
+  }
+
+  const allTabs = await chrome.tabs.query({});
+  const matchingTabs = allTabs.filter(tab => {
+    const title = (tab.title || '').toLowerCase();
+    const url = (tab.url || '').toLowerCase();
+    return title.includes(query) || url.includes(query);
+  });
+
+  const matchingHistory = await getBrowserHistory(query, 10);
+
+  if (matchingTabs.length > 0 || matchingHistory.length > 0 || query.length > 0) {
+    showSearchResults(matchingTabs, matchingHistory, query);
+  } else {
+    hideSearchResults();
+  }
+}
+
+// Show search history
+async function showSearchHistory() {
+  const history = await getBrowserHistory('', 20);
+  const searchResults = document.getElementById('searchResults');
+  
+  if (history.length === 0) {
+    hideSearchResults();
+    return;
+  }
+
+  let html = '';
+  
+  // Add history section header
+  html += `
+    <div style="padding: 8px 16px; font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; background: rgba(154, 145, 138, 0.04);">
+      Recent history
+    </div>
+  `;
+  
+  // Add history items
+  html += history.map(item => `
+    <div class="search-result-item" data-url="${encodeURIComponent(item.url)}" data-title="${encodeURIComponent(item.title || item.url)}" data-action="open-history">
+      <svg class="search-result-icon" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <circle cx="12" cy="12" r="10"/>
+        <polyline points="12 6 12 12 16 14"/>
+      </svg>
+      <div class="search-result-content">
+        <div class="search-result-title">${escapeHtml(item.title || item.url)}</div>
+        <div class="search-result-url">${escapeHtml(item.url)}</div>
+      </div>
+      <span class="search-result-type">History</span>
+    </div>
+  `).join('');
+
+  searchResults.innerHTML = html;
+  searchResults.style.display = 'block';
+}
+
+// Show search results dropdown
+function showSearchResults(tabs, history, query) {
+  const searchResults = document.getElementById('searchResults');
+  if (!searchResults) return;
+
+  let html = '';
+
+  // Add matching tabs first
+  if (tabs.length > 0) {
+    html += tabs.map(tab => {
+      const faviconUrl = tab.favIconUrl || 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>';
+      return `
+        <div class="search-result-item" data-tab-id="${tab.id}" data-action="go-to-tab">
+          <img class="search-result-favicon" src="${faviconUrl}" alt="" onerror="this.style.display='none'">
+          <div class="search-result-content">
+            <div class="search-result-title">${escapeHtml(tab.title || tab.url)}</div>
+            <div class="search-result-url">${escapeHtml(tab.url)}</div>
+          </div>
+          <span class="search-result-type">Tab</span>
+        </div>
+      `;
+    }).join('');
+  }
+
+  // Add history matches
+  if (history.length > 0) {
+    html += `
+      <div style="padding: 8px 16px; font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; background: rgba(154, 145, 138, 0.04);">
+        History
+      </div>
+    `;
+    html += history.map(item => `
+      <div class="search-result-item" data-url="${encodeURIComponent(item.url)}" data-title="${encodeURIComponent(item.title || item.url)}" data-action="open-history">
+        <svg class="search-result-icon" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="12" cy="12" r="10"/>
+          <polyline points="12 6 12 12 16 14"/>
+        </svg>
+        <div class="search-result-content">
+          <div class="search-result-title">${escapeHtml(item.title || item.url)}</div>
+          <div class="search-result-url">${escapeHtml(item.url)}</div>
+        </div>
+        <span class="search-result-type">History</span>
+      </div>
+    `).join('');
+  }
+
+  // Add web search option
+  html += `
+    <div class="search-result-item" data-query="${encodeURIComponent(query)}" data-action="web-search">
+      <svg class="search-result-icon" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2">
+        <circle cx="11" cy="11" r="8"/>
+        <path d="M21 21l-4.35-4.35"/>
+      </svg>
+      <div class="search-result-content">
+        <div class="search-result-title">Search web for "${escapeHtml(query)}"</div>
+        <div class="search-result-url">https://www.google.com/search?q=${encodeURIComponent(query)}</div>
+      </div>
+      <span class="search-result-type">Web</span>
+    </div>
+  `;
+
+  searchResults.innerHTML = html;
+  searchResults.style.display = 'block';
+}
+
+// Hide search results dropdown
+function hideSearchResults() {
+  const searchResults = document.getElementById('searchResults');
+  if (searchResults) {
+    searchResults.style.display = 'none';
+  }
+}
+
+// Handle Enter key press
+async function handleSearchEnter() {
+  const searchInput = document.getElementById('searchInput');
+  const searchResults = document.getElementById('searchResults');
+  const query = searchInput.value.trim();
+
+  if (!query) return;
+
+  const allTabs = await chrome.tabs.query({});
+  const matchingTabs = allTabs.filter(tab => {
+    const title = (tab.title || '').toLowerCase();
+    const url = (tab.url || '').toLowerCase();
+    return title.includes(query.toLowerCase()) || url.includes(query.toLowerCase());
+  });
+
+  if (matchingTabs.length > 0) {
+    // If there are matching tabs, go to the first one
+    const tab = matchingTabs[0];
+    await chrome.tabs.update(tab.id, { active: true });
+    await chrome.windows.update(tab.windowId, { focused: true });
+    hideSearchResults();
+  } else {
+    // Otherwise, perform web search
+    performWebSearch(query);
+  }
+}
+
+// Perform web search
+function performWebSearch(query) {
+  const searchUrl = `https://www.google.com/search?q=${encodeURIComponent(query)}`;
+  chrome.tabs.create({ url: searchUrl });
+}
+
+// Go to a specific tab
+async function goToTab(tabId) {
+  try {
+    const tab = await chrome.tabs.get(tabId);
+    await chrome.tabs.update(tabId, { active: true });
+    await chrome.windows.update(tab.windowId, { focused: true });
+    hideSearchResults();
+  } catch (err) {
+    console.warn('[tab-out] Failed to go to tab:', err);
+  }
+}
+
+// Open history item in new tab
+function openHistoryItem(url) {
+  chrome.tabs.create({ url: url });
+  hideSearchResults();
+}
+
+// Handle search result clicks
+document.addEventListener('click', async (e) => {
+  const item = e.target.closest('[data-action="go-to-tab"]');
+  if (item) {
+    const tabId = parseInt(item.dataset.tabId);
+    if (!isNaN(tabId)) {
+      await goToTab(tabId);
+    }
+    return;
+  }
+
+  const historyItem = e.target.closest('[data-action="open-history"]');
+  if (historyItem) {
+    const url = decodeURIComponent(historyItem.dataset.url);
+    openHistoryItem(url);
+    return;
+  }
+
+  const webSearchItem = e.target.closest('[data-action="web-search"]');
+  if (webSearchItem) {
+    const query = decodeURIComponent(webSearchItem.dataset.query);
+    performWebSearch(query);
+    return;
+  }
+});
+
+// Helper function to escape HTML
+function escapeHtml(text) {
+  const div = document.createElement('div');
+  div.textContent = text;
+  return div.innerHTML;
+}
 
 renderDashboard();

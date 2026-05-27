@@ -30,7 +30,7 @@ This project is forked from [https://github.com/zarazhangrui/tab-out](https://gi
 
 3. **Enhanced Duplicate Banner** - Improved cleanup options:
    - "Close duplicate Tab-Out" button
-   - "Close duplicates" button for all duplicate tabs
+   - "Close all duplicates" button for all duplicate tabs
    - Smart visibility - only shows when duplicates exist
 
 4. **Real-time Updates** - Auto-sync when tabs change:

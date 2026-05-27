@@ -29,7 +29,7 @@ Tab Out 是一个 Chrome 浏览器扩展，它将你的新标签页替换为一�
 
 3. **增强的重复标签提示** - 改进的清理选项：
    - "Close duplicate Tab-Out" 按钮
-   - "Close duplicates" 按钮关闭所有重复标签
+   - "Close allduplicates" 按钮关闭所有重复标签
    - 智能显示 - 仅在有重复时显示
 
 4. **实时更新** - 标签页变化时自动同步：
