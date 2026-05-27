@@ -37,15 +37,38 @@ This project is forked from [https://github.com/zarazhangrui/tab-out](https://gi
    - Tab creation/deletion triggers dashboard refresh
    - Click tracking works in background
 
-5. **Additional Improvements**:
+5. **Search Bar with Smart Search**:
+   - Search open tabs by title or URL
+   - Search browser history (30 days)
+   - Web search integration (Google/Edge)
+   - Keyboard navigation with ↑/↓ arrows
+   - IME (Input Method Editor) support for Asian languages
+   - Focus search input automatically on page load
+
+6. **Layout & UI Improvements**:
+   - Idle tabs and click stats now side-by-side
+   - Header centered with cleaner design
+   - Removed header bottom divider
+   - Optimized page spacing and padding
+   - Improved search results styling (white background)
+
+7. **Closing Tab Optimization**:
+   - Single tab close no longer reloads entire dashboard
+   - More graceful animations for card removal
+   - Improved duplicate tab detection and closing
+   - Properly handles chrome:// pages
+
+8. **Additional Improvements**:
    - Support for chrome:// pages in stats
    - Better styling and UI improvements
    - Fixed Content Security Policy issues
+   - Reduced unnecessary bottom space in Chrome
 
 ---
 
 ## Features
 
+- **Smart search bar** search open tabs, browser history, or the web
 - **See all your tabs at a glance** on a clean grid, grouped by domain
 - **Homepages group** pulls Gmail inbox, X home, YouTube, LinkedIn, GitHub homepages into one card
 - **Close tabs with style** with swoosh sound + confetti burst
@@ -54,6 +77,7 @@ This project is forked from [https://github.com/zarazhangrui/tab-out](https://gi
 - **Save for later** bookmark tabs to a checklist before closing them
 - **Localhost grouping** shows port numbers next to each tab so you can tell your vibe coding projects apart
 - **Expandable groups** show the first 8 tabs with a clickable "+N more"
+- **Idle tabs and click stats side-by-side** for better space utilization
 - **Idle tabs section** groups tabs by last accessed time
 - **Click stats section** tracks how often you access each tab
 - **100% local** your data never leaves your machine
@@ -109,10 +133,11 @@ You'll see Tab Out.
 
 ```
 You open a new tab
+  -> Search bar automatically receives focus
   -> Tab Out shows your open tabs grouped by domain
   -> Homepages (Gmail, X, etc.) get their own group at the top
-  -> Idle tabs shown grouped by last accessed time
-  -> Click stats shown grouped by click frequency
+  -> Idle tabs and click stats shown side-by-side
+  -> Use search to find tabs, history, or search the web
   -> Click any tab title to jump to it
   -> Close groups you're done with (swoosh + confetti)
   -> Save tabs for later before closing them
@@ -127,7 +152,9 @@ Everything runs inside the Chrome extension. No external server, no API calls, n
 | What | How |
 |------|-----|
 | Extension | Chrome Manifest V3 |
+| Permissions | tabs, storage, history, activeTab |
 | Storage | chrome.storage.local |
+| History | chrome.history API (30 days) |
 | Sound | Web Audio API (synthesized, no files) |
 | Animations | CSS transitions + JS confetti particles |
 
