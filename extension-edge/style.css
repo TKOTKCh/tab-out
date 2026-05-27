@@ -537,6 +537,22 @@ header {
   border-radius: 2px;
 }
 
+/* Default icon when favicon is not available */
+.chip-default-icon {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--muted);
+}
+
+.chip-default-icon svg {
+  width: 14px;
+  height: 14px;
+}
+
 /* Title text — wraps naturally, no truncation */
 .chip-text {
   flex: 1;
